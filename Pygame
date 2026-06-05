@@ -1,0 +1,129 @@
+import pygame
+import sys
+import time
+
+# Initialize Pygame
+pygame.init()
+
+# Constants
+WIDTH, HEIGHT = 800, 600
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
+pygame.display.set_caption("Загрузка игры...")
+
+# Colors
+WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
+GRAY = (50, 50, 50)
+GREEN = (46, 204, 113)
+BLUE = (0, 0, 255)
+RED = (255, 0, 0)
+
+# Load background image
+try:
+    loader_bg = pygame.image.load('background.png')
+    loader_bg = pygame.transform.scale(loader_bg, (WIDTH, HEIGHT))
+except:
+    loader_bg = None
+
+# Fonts
+font = pygame.font.SysFont("Arial", 32)
+small_font = pygame.font.SysFont("Arial", 18)
+
+# Loading tips
+loading_tips = [
+    "Initializing game engine...",
+    "Loading game assets...",
+    "Preparing questions...",
+    "Setting up interface...",
+    "Almost ready...",
+    "Starting game..."
+]
+
+def show_splash_screen():
+    """Display animated splash screen with fade-in effect"""
+    splash_font = pygame.font.SysFont("Arial", 50, bold=True)
+    text = splash_font.render("Welcome to the Questions lesson", True, WHITE)
+    text_rect = text.get_rect(center=(WIDTH // 2, HEIGHT // 2))
+    surface = pygame.Surface(text.get_size()).convert_alpha()
+    
+    for alpha in range(0, 255, 5):
+        screen.fill(BLUE)
+        surface.fill((0, 0, 0, 0))
+        surface.blit(text, (0, 0))
+        surface.set_alpha(alpha)
+        screen.blit(surface, text_rect)
+        pygame.display.flip()
+        pygame.time.delay(20)
+    time.sleep(1)
+
+def draw_loading_screen(progress):
+    """Draw loading screen with progress bar and tips"""
+    if loader_bg:
+        screen.blit(loader_bg, (0, 0))
+    else:
+        screen.fill(RED)
+    
+    # Loading percentage text
+    text = font.render(f"ЗАГРУЗКА... {progress}%", True, WHITE)
+    text_rect = text.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 50))
+    screen.blit(text, text_rect)
+    
+    # Progress bar
+    bar_width, bar_height = 400, 30
+    bar_x, bar_y = (WIDTH - bar_width) // 2, (HEIGHT - bar_height) // 2 + 20
+    
+    # Draw border
+    pygame.draw.rect(screen, GRAY, (bar_x, bar_y, bar_width, bar_height), 2)
+    
+    # Draw fill
+    inner_bar_width = int((bar_width - 4) * (progress / 100))
+    if inner_bar_width > 0:
+        pygame.draw.rect(screen, GREEN, (bar_x + 2, bar_y + 2, inner_bar_width, bar_height - 4))
+    
+    # Loading tip
+    tip_index = min(progress // (100 // len(loading_tips)), len(loading_tips) - 1)
+    tip_text = loading_tips[tip_index]
+    tip = small_font.render(tip_text, True, WHITE)
+    screen.blit(tip, (WIDTH // 2 - tip.get_width() // 2, HEIGHT - 50))
+    
+    pygame.display.flip()
+
+def main_loading():
+    """Main loading sequence"""
+    show_splash_screen()
+    progress = 0
+    clock = pygame.time.Clock()
+    
+    while progress <= 100:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+        
+        draw_loading_screen(progress)
+        clock.tick(30)  # Limit to 30 FPS for smooth animation
+        progress += 1
+
+def main_game():
+    """Main game loop"""
+    running = True
+    while running:
+        screen.fill((30, 30, 30))
+        msg = font.render("ИГРА НАЧАЛАСЬ!", True, WHITE)
+        screen.blit(msg, (WIDTH // 2 - msg.get_width() // 2, HEIGHT // 2))
+        
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    running = False
+        
+        pygame.display.flip()
+
+# Run the application
+if __name__ == "__main__":
+    main_loading()
+    main_game()
+    pygame.quit()
+    sys.exit()

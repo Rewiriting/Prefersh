@@ -886,3 +886,4 @@ if check_password():
         show_my_ratings()
     
     main_app()
+#запускать через терминал через эту команду python -m streamlit run app.py

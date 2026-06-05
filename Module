@@ -1,0 +1,143 @@
+import pandas as pd
+import numpy as np
+import faiss
+import os
+import random
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sentence_transformers import SentenceTransformer
+from sklearn.preprocessing import MultiLabelBinarizer, normalize
+
+os.environ['TOKENIZERS_PARALLELISM'] = 'false'
+
+# --- ОБНОВЛЕННАЯ ГЕНЕРАЦИЯ ДАННЫХ (с годами) ---
+def prepare_csv(path='movies_demo.csv'):
+    base_titles = ['Toy Story', 'Jumanji', 'Heat', 'Casino', 'GoldenEye', 'Balto', 'Nixon', 'Sabrina', 'Get Shorty', 'Pocahontas',
+                   'Shrek', 'The Lion King', 'Finding Nemo', 'Frozen', 'Moana', 'Aladdin', 'Cars', 'Ratatouille', 'Mulan', 'Madagascar']
+
+    words = ['Shadow', 'Last', 'Night', 'Space', 'Dead', 'King', 'Dark', 'City', 'War', 'Star']
+    genres_pool = ['Action', 'Adventure', 'Comedy', 'Drama', 'Sci-Fi', 'Thriller', 'Horror', 'Animation|Children']
+
+    titles, genres, years = [], [], []
+
+    # Генерируем 1000 фильмов с разными годами
+    for i in range(1, 1001):
+        if i <= len(base_titles):
+            titles.append(base_titles[i-1])
+            years.append(random.randint(1995, 2010)) # Базовые фильмы сделаем старыми
+        else:
+            titles.append(f"{random.choice(words)} {random.choice(words)} {i}")
+            years.append(random.randint(1990, 2024)) # Остальные вразброс
+
+        genres.append('|'.join(random.sample(genres_pool, random.randint(1, 3))))
+
+    df = pd.DataFrame({'movieId': range(1, 1001), 'title': titles, 'genre': genres, 'year': years})
+    df['description'] = df.apply(lambda x: f"A {x['genre']} movie from {x['year']} called {x['title']}.", axis=1)
+    df.to_csv(path, index=False)
+    print("База данных создана: добавлены года выпуска (1990-2024).")
+
+prepare_csv()
+
+class FastMovieRecommender:
+    def __init__(self, df):
+        self.df = df.copy().reset_index(drop=True)
+        self.model = SentenceTransformer('all-MiniLM-L6-v2')
+        self._prepare_features()
+
+    def _prepare_features(self):
+        print("Векторизация данных...")
+        mlb = MultiLabelBinarizer()
+        genre_feats = mlb.fit_transform(self.df['genre'].fillna('').str.split('|')).astype('float32')
+        desc_feats = self.model.encode(self.df['description'].tolist(), show_progress_bar=True).astype('float32')
+
+        combined = np.hstack([genre_feats * 1.5, desc_feats])
+        self.features = normalize(combined, axis=1).astype('float32')
+        self.index = faiss.IndexFlatIP(self.features.shape[1])
+        self.index.add(self.features)
+
+    def recommend_by_ratings(self, user_ratings, top_n=10, min_sim=0.4, start_year=2022):
+        # Возвращаем размерность признаков для создания вектора
+        user_vec = np.zeros((1, self.features.shape[1]), dtype='float32')
+        rated_titles = list(user_ratings.keys())
+
+        for title, rating in user_ratings.items():
+            idx_list = self.df[self.df['title'] == title].index
+            if not idx_list.empty:
+                # Возвращаем стандартный вес (без ослабления), чтобы искать точные совпадения
+                weight = rating - 2.5
+                user_vec += self.features[idx_list] * weight
+
+        faiss.normalize_L2(user_vec)
+        # Ищем кандидатов
+        similarities, indices = self.index.search(user_vec, 500)
+
+        results = []
+        # Проходим по результатам поиска (индекс [0], так как вектор один)
+        for sim, i in zip(similarities[0], indices[0]):
+            row = self.df.iloc[i]
+            # ФИЛЬТР: Только те, где similarity больше 0.4
+            if row['title'] not in rated_titles and sim >= min_sim and row['year'] >= start_year:
+                results.append({
+                    'title': row['title'],
+                    'year': row['year'],
+                    'similarity': round(float(sim), 3),
+                    'genre': row['genre']
+                })
+            if len(results) >= top_n: break
+
+        return pd.DataFrame(results)
+
+    def plot_similarity_dist(self, recommendations, title_context):
+        if recommendations.empty: return
+        plt.figure(figsize=(10, 6))
+        sns.barplot(data=recommendations, x='similarity', y='title', hue='title', palette='viridis', legend=False)
+        plt.title(f"Релевантные новинки (Sim > 0.4) на основе: {title_context}")
+        plt.xlim(0, 1) # Теперь шкала до 1, так как значения будут высокими
+        plt.show()
+
+
+    def plot_similarity_dist(self, recommendations, title_context):
+        if recommendations.empty: return
+        plt.figure(figsize=(10, 6))
+        sns.barplot(data=recommendations, x='similarity', y='title', hue='title', palette='coolwarm', legend=False)
+        plt.title(f"Новинки с низким сходством (< 0.3) на основе: {title_context}")
+        plt.xlim(0, 0.4) # Ограничиваем ось X для наглядности
+        plt.show()
+
+
+    def plot_similarity_dist(self, recommendations, title_context):
+        if recommendations.empty: return
+        plt.figure(figsize=(10, 6))
+        sns.barplot(data=recommendations, x='similarity', y='title', hue='title', palette='rocket', legend=False)
+        plt.title(f"Новинки (2022-2024) на основе: {title_context}")
+        plt.xlim(0, 1)
+        plt.show()
+
+# --- ЗАПУСК ---
+df_loaded = pd.read_csv('movies_demo.csv')
+rec_sys = FastMovieRecommender(df_loaded)
+
+def start_user_session():
+    # ФИЛЬТР: Для оценки предлагаем только фильмы 2000-2010 годов
+    old_movies_pool = df_loaded[(df_loaded['year'] >= 2000) & (df_loaded['year'] <= 2010)]
+    sample_movies = old_movies_pool['title'].head(10).tolist()
+
+    user_ratings = {}
+    print(f"\n--- ОЦЕНИТЕ КЛАССИКУ (2000-2010) ---")
+    for movie in sample_movies:
+        year = old_movies_pool[old_movies_pool['title'] == movie]['year'].values[0]
+        res = input(f"{movie} ({year}): ")
+        if res.isdigit() and int(res) > 0: user_ratings[movie] = int(res)
+
+    if user_ratings:
+        print("\nИщем похожие новинки (2022-2024)...")
+        recs = rec_sys.recommend_by_ratings(user_ratings, top_n=10, start_year=2022)
+        if not recs.empty:
+            print("\nРЕКОМЕНДУЕМЫЕ НОВИНКИ:"); print(recs)
+            rec_sys.plot_similarity_dist(recs, "ваших оценок старых фильмов")
+        else:
+            print("\nСреди новинок ничего не найдено. Попробуйте поставить оценки выше.")
+    else:
+        print("Нет оценок.")
+
+start_user_session()
